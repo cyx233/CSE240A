@@ -33,14 +33,21 @@ int verbose;
 //      Predictor Data Structures     //
 //------------------------------------//
 
-//
-// TODO: Add your own Branch Predictor data structures here
-//
 int ghistoryReg = 0;
 uint8_t *globalPredictor;
 uint8_t *localPredictor;
 int *lhistoryRegs;
 uint8_t *choice;
+
+#define INPUT_LEN 427
+#define INPUT_H 19
+#define MAX_WEIGHT 1 << 7
+
+int16_t W[INPUT_LEN][INPUT_H + 1];
+uint8_t ghistory[INPUT_H];
+int threshold;
+uint8_t _hot = NOTTAKEN;
+uint8_t train = 0;
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -48,6 +55,24 @@ uint8_t *choice;
 
 // Initialize the predictor
 //
+int hash(uint32_t pc) { return (pc * 19) % INPUT_LEN; }
+
+void backward(int16_t *w, uint8_t same) { *w += same ? (*w < MAX_WEIGHT - 1 ? 1 : 0) : (*w > -MAX_WEIGHT ? -1 : 0); }
+int forward(uint32_t pc)
+{
+  int index = hash(pc);
+  int out = W[index][0];
+
+  for (int i = 1; i <= INPUT_H; i++)
+  {
+    out += ghistory[i - 1] == TAKEN ? W[index][i] : -W[index][i];
+  }
+
+  _hot = (out >= 0) ? TAKEN : NOTTAKEN;
+  train = (out < threshold && out > -threshold) ? 1 : 0;
+
+  return _hot;
+}
 
 void init_predictor()
 {
@@ -80,6 +105,12 @@ void init_predictor()
       choice[i] = 2;
     break;
   case CUSTOM:
+    threshold = 1.93 * INPUT_H + 14;
+    for (int i = 0; i < INPUT_LEN; i++)
+      for (int j = 0; j < INPUT_H; j++)
+        W[i][j] = 0;
+    for (int i = 0; i < INPUT_H; i++)
+      ghistory[i] = 0;
   default:
     break;
   }
@@ -103,6 +134,7 @@ make_prediction(uint32_t pc)
 
   // Make a prediction based on the bpType
   int ghis;
+  uint32_t index = hash(pc);
   switch (bpType)
   {
   case STATIC:
@@ -116,6 +148,7 @@ make_prediction(uint32_t pc)
            : localPredictor[lhistoryRegs[clip(pc, pcIndexBits)]] >= 2 ? TAKEN
                                                                       : NOTTAKEN;
   case CUSTOM:
+    return forward(pc);
   default:
     return NOTTAKEN;
   }
@@ -132,6 +165,7 @@ void train_predictor(uint32_t pc, uint8_t outcome)
   //
   int index = 0;
   int ghis = 0;
+  int pout = outcome == TAKEN ? 1 : -1;
   switch (bpType)
   {
   case STATIC:
@@ -190,6 +224,20 @@ void train_predictor(uint32_t pc, uint8_t outcome)
     lhistoryRegs[clip(pc, pcIndexBits)] = ((lhistoryRegs[clip(pc, pcIndexBits)] << 1) + outcome) & ((1 << lhistoryBits) - 1);
     break;
   case CUSTOM:
+    index = hash(pc);
+
+    if ((_hot != outcome) || train)
+    {
+      backward(&(W[index][0]), outcome);
+      for (int i = 1; i <= INPUT_H; i++)
+      {
+        backward(&(W[index][i]), (outcome == ghistory[i - 1]));
+      }
+    }
+
+    for (int i = INPUT_H - 1; i > 0; i--)
+      ghistory[i] = ghistory[i - 1];
+    ghistory[0] = outcome;
   default:
     break;
   }
