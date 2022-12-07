@@ -37,10 +37,10 @@ int verbose;
 // TODO: Add your own Branch Predictor data structures here
 //
 int ghistoryReg = 0;
-uint8_t *globalPredictor; // 1024*2 = 2K
-uint8_t *localPredictor;  // 2048*2 = 4K
-int *lhistoryRegs;        // 2048*10 = 20K
-uint8_t *choice;          // 1024*2 = 2K
+uint8_t *globalPredictor;
+uint8_t *localPredictor;
+int *lhistoryRegs;
+uint8_t *choice;
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -48,30 +48,6 @@ uint8_t *choice;          // 1024*2 = 2K
 
 // Initialize the predictor
 //
-
-uint8_t get1bit(uint8_t *a, int index)
-{
-  return (a[index / 8] >> (index % 8)) & 1;
-}
-
-void set1bit(uint8_t *a, int index, int target)
-{
-  if (target == 1)
-    a[index / 8] |= 1 << (index % 8);
-  else
-    a[index / 8] &= ~(1 << (index % 8));
-}
-
-uint8_t get2bit(uint8_t *a, int index)
-{
-  return (a[index / 8] >> (index % 4)) & 3;
-}
-
-void set2bit(uint8_t *a, int index, int target)
-{
-  a[index / 8] &= ~(1 << (index % 4));
-  a[index / 8] |= target << (index % 4);
-}
 
 void init_predictor()
 {
