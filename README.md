@@ -1,5 +1,12 @@
 # CSE240A Branch Predictor Project
 
+## result
+|  |int_1|int_2|fp_1|fp_2|mm_1|mm_2|
+|--|--|--|--|--|--|--|
+|gshare:13|18.207|0.669|1.603|2.972|8.340|10.473
+|tournament:9:10:10|13.152|0.538|1.022|4.660|4.056|9.234
+|custom|8.285|0.303|0.826|0.962|1.960|8.813|
+
 ## Table of Contents
   * [Introduction](#introduction)
   * [Code Integrity](#code-integrity)
