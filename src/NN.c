@@ -6,6 +6,7 @@
 //  described in the README                               //
 //========================================================//
 #include <stdio.h>
+#include <math.h>
 #include "predictor.h"
 
 //
@@ -33,22 +34,31 @@ int verbose;
 //      Predictor Data Structures     //
 //------------------------------------//
 
-int ghistoryReg = 0;
+uint32_t ghistoryReg = 0;
 uint8_t *globalPredictor;
 uint8_t *localPredictor;
 int *lhistoryRegs;
 uint8_t *choice;
 
-#define W_LEN 127
-#define W_H 32
-#define MAX_WEIGHT 1 << 14
+#define W_HIDDEN 32
+#define W_OUT 16
+#define PCBIT 32
+#define HIS_LEN 32
+#define LR 0.05
 
-int16_t W[W_LEN][W_H]; // 16*127*32 = 63.5KB
-int8_t ghistory[W_H];  // 32*8 = 0.25KB
+float W_in[PCBIT + HIS_LEN][W_HIDDEN];
+float W_hidden[W_HIDDEN][W_OUT];
+float W_out[W_OUT];
 
-int threshold;
-uint8_t _hot = -1;
-uint8_t train = 0;
+float input[PCBIT + HIS_LEN];
+float x1[W_HIDDEN];
+float x2[W_OUT];
+
+float delta0[PCBIT + HIS_LEN];
+float delta1[W_HIDDEN];
+float delta2[W_OUT];
+
+float pred, _hot, delta, threshold;
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -56,21 +66,114 @@ uint8_t train = 0;
 
 // Initialize the predictor
 //
-int hash(uint32_t pc) { return (pc * 19) % W_LEN; }
+#define M_PI 3.1415926
+int phase = 0;
+float gaussrand(float mean, float stddev)
+{
+  float Z;
+  float U, V;
 
-void backward(int16_t *w, uint8_t same) { *w += same == 1 ? (*w < MAX_WEIGHT - 1 ? 1 : 0) : (*w > -MAX_WEIGHT ? -1 : 0); }
+  if (phase == 0)
+  {
+    U = (rand() + 1.) / (RAND_MAX + 2.);
+    V = rand() / (RAND_MAX + 1.);
+    Z = sqrt(-2 * log(U)) * sin(2 * M_PI * V);
+  }
+  else
+  {
+    Z = sqrt(-2 * log(U)) * cos(2 * M_PI * V);
+  }
+
+  phase = 1 - phase;
+
+  return mean + stddev * Z;
+}
+
+float sigmoid(float x)
+{
+  return exp(x) / (1 + exp(x));
+}
+
 int forward(uint32_t pc)
 {
-  int index = hash(pc);
-  int out = W[index][0];
+  for (int i = 0; i < PCBIT; i++)
+    input[i] = (pc >> i) & 1;
 
-  for (int i = 1; i < W_H; i++)
-    out += ghistory[i - 1] * W[index][i];
+  for (int i = 0; i < HIS_LEN; i++)
+    input[i + PCBIT] = (ghistoryReg >> i) & 1;
 
-  _hot = (out >= 0) ? TAKEN : NOTTAKEN;
-  train = (out < threshold && out > -threshold) ? 1 : 0;
+  for (int i = 0; i < W_HIDDEN; ++i)
+  {
+    x1[i] = 0;
+    for (int j = 0; j < PCBIT + HIS_LEN; ++j)
+      x1[i] += W_in[j][i] * input[j];
+  }
 
-  return _hot;
+  for (int i = 0; i < W_OUT; ++i)
+  {
+    x2[i] = 0;
+    for (int j = 0; j < W_HIDDEN; ++j)
+      x2[i] += sigmoid(x1[j]) * W_hidden[j][i];
+  }
+
+  for (int i = 0; i < W_OUT; ++i)
+    _hot = sigmoid(x2[i]) * W_out[i];
+
+  pred = sigmoid(_hot);
+  if (isnan(pred))
+  {
+    exit(0);
+  }
+  return pred;
+}
+
+void backward(uint8_t outcome)
+{
+  float loss = 0;
+  float temp = 0;
+
+  if (outcome == TAKEN)
+    loss = log(pred);
+  else
+    loss = log(1 - pred);
+
+  delta = -(sigmoid(_hot) - outcome);
+
+  for (int i = 0; i < W_OUT; i++)
+  {
+    delta2[i] = delta * W_out[i] * temp * (1 - temp);
+  }
+
+  for (int i = 0; i < W_HIDDEN; i++)
+  {
+    temp = sigmoid(x1[i]);
+    delta1[i] = 0;
+    for (int j = 0; j < W_OUT; j++)
+      delta1[i] += delta2[j] * W_hidden[i][j] * temp * (1 - temp);
+  }
+
+  for (int i = 0; i < PCBIT + HIS_LEN; i++)
+  {
+    temp = sigmoid(input[i]);
+    delta0[i] = 0;
+    for (int j = 0; j < W_HIDDEN; j++)
+      delta0[i] += delta1[j] * W_in[i][j] * temp * (1 - temp);
+  }
+}
+
+void step()
+{
+
+  for (int i = 0; i < PCBIT + HIS_LEN; i++)
+    for (int j = 0; j < W_HIDDEN; j++)
+      W_in[i][j] += LR * delta0[j] * input[i];
+
+  for (int i = 0; i < W_HIDDEN; i++)
+    for (int j = 0; j < W_OUT; j++)
+      W_hidden[i][j] += LR * delta1[j] * x1[i];
+
+  for (int i = 0; i < W_OUT; i++)
+    W_out[i] += LR * delta * x2[i];
 }
 
 void init_predictor()
@@ -104,12 +207,17 @@ void init_predictor()
       choice[i] = 2;
     break;
   case CUSTOM:
-    threshold = 1.25 * W_H + 14;
-    for (int i = 0; i < W_LEN; i++)
-      for (int j = 0; j < W_H; j++)
-        W[i][j] = 0;
-    for (int i = 0; i < W_H; i++)
-      ghistory[i] = -1;
+    for (int i = 0; i < PCBIT + HIS_LEN; i++)
+      for (int j = 0; j < W_HIDDEN; j++)
+        W_in[i][j] = gaussrand(0, 0.5);
+
+    for (int i = 0; i < W_HIDDEN; i++)
+      for (int j = 0; j < W_OUT; j++)
+        W_hidden[i][j] = gaussrand(0, 0.5);
+
+    for (int i = 0; i < W_OUT; i++)
+      W_out[i] = gaussrand(0, 0.5);
+
   default:
     break;
   }
@@ -133,7 +241,6 @@ make_prediction(uint32_t pc)
 
   // Make a prediction based on the bpType
   int ghis;
-  uint32_t index = hash(pc);
   switch (bpType)
   {
   case STATIC:
@@ -147,7 +254,7 @@ make_prediction(uint32_t pc)
            : localPredictor[lhistoryRegs[clip(pc, pcIndexBits)]] >= 2 ? TAKEN
                                                                       : NOTTAKEN;
   case CUSTOM:
-    return forward(pc);
+    return forward(pc) > threshold ? TAKEN : NOTTAKEN;
   default:
     return NOTTAKEN;
   }
@@ -164,7 +271,7 @@ void train_predictor(uint32_t pc, uint8_t outcome)
   //
   int index = 0;
   int ghis = 0;
-  int8_t pout = outcome == TAKEN ? 1 : -1;
+  int pout = outcome == TAKEN ? 1 : -1;
   switch (bpType)
   {
   case STATIC:
@@ -223,18 +330,9 @@ void train_predictor(uint32_t pc, uint8_t outcome)
     lhistoryRegs[clip(pc, pcIndexBits)] = ((lhistoryRegs[clip(pc, pcIndexBits)] << 1) + outcome) & ((1 << lhistoryBits) - 1);
     break;
   case CUSTOM:
-    index = hash(pc);
-
-    if ((_hot != outcome) || train)
-    {
-      backward(&(W[index][0]), pout);
-      for (int i = 1; i <= W_H; i++)
-        backward(&(W[index][i]), (pout == ghistory[i - 1]));
-    }
-
-    for (int i = W_H - 1; i > 0; i--)
-      ghistory[i] = ghistory[i - 1];
-    ghistory[0] = pout;
+    backward(outcome);
+    step();
+    ghistoryReg = ((ghistoryReg << 1) + outcome) & ((1 << ghistoryBits) - 1);
   default:
     break;
   }
