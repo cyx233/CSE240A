@@ -36,10 +36,13 @@ int verbose;
 //
 // TODO: Add your own Branch Predictor data structures here
 //
-int ghistoryReg = 0;
-int lhistoryReg = 0;
-int *globalPredictTable;
-int **localPredictTable;
+uint8_t ghistoryReg = 0;
+uint8_t lhistoryReg = 0;
+uint8_t globalPredictTable[1 << 13];
+uint8_t localPredictTable[1 << 10][1 << 10];
+
+uint8_t mGPred[1 << 13];
+uint8_t mLPred[1024][256];
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -58,24 +61,28 @@ void init_predictor()
     break;
   case GSHARE:
     ghistoryReg = 0;
-    globalPredictTable = malloc((1 << ghistoryBits) * sizeof *globalPredictTable);
     for (int i = 0; i < (1 << ghistoryBits); i++)
       globalPredictTable[i] = NOTTAKEN;
     break;
   case TOURNAMENT:
-    globalPredictTable = malloc((1 << ghistoryBits) * sizeof *globalPredictTable);
     for (int i = 0; i < (1 << ghistoryBits); i++)
       globalPredictTable[i] = 0;
 
-    localPredictTable = malloc((1 << lhistoryBits) * sizeof *localPredictTable);
     for (int i = 0; i < (1 << lhistoryBits); i++)
     {
-      localPredictTable[i] = malloc((1 << pcIndexBits) * sizeof *localPredictTable[i]);
       for (int j = 0; j < (1 << pcIndexBits); j++)
         localPredictTable[i][j] = 2;
     }
     break;
   case CUSTOM:
+    ghistoryReg = 0;
+    for (int i = 0; i < (1 << ghistoryBits); i++)
+      globalPredictTable[i] = 0;
+    for (int i = 0; i < (1 << lhistoryBits); i++)
+    {
+      for (int j = 0; j < (1 << pcIndexBits); j++)
+        localPredictTable[i][j] = 2;
+    }
   default:
     break;
   }
@@ -106,6 +113,18 @@ make_prediction(uint32_t pc)
                ? TAKEN
                : (globalPredictTable[ghistoryReg] >= 2 ? TAKEN : NOTTAKEN);
   case CUSTOM:
+    // Hybrid GSHARE + TOURNAMENT predictor
+    // Use GSHARE predictor for branch instructions with high degree of correlation
+    if (globalPredictTable[ghistoryReg] >= 2)
+      return globalPredictTable[(pc & ((1 << ghistoryBits) - 1)) ^ ghistoryReg];
+    // Otherwise, use TOURNAMENT predictor for branch instructions with low degree of correlation
+    else
+    {
+      index = (pc & ((1 << pcIndexBits) - 1)) ^ lhistoryReg;
+      return (localPredictTable[index][ghistoryReg] >= 2)
+                 ? TAKEN
+                 : (globalPredictTable[ghistoryReg] >= 2 ? TAKEN : NOTTAKEN);
+    }
   default:
     return NOTTAKEN;
   }
@@ -139,6 +158,24 @@ void train_predictor(uint32_t pc, uint8_t outcome)
     lhistoryReg = ((lhistoryReg << 1) + outcome) & ((1 << lhistoryBits) - 1);
     break;
   case CUSTOM:
+    // Train GSHARE predictor for branch instructions with high degree of correlation
+    if (globalPredictTable[ghistoryReg] >= 2)
+    {
+      globalPredictTable[(pc & ((1 << ghistoryBits) - 1)) ^ ghistoryReg] = outcome;
+      ghistoryReg = ((ghistoryReg << 1) + outcome) & ((1 << ghistoryBits) - 1);
+    }
+    // Otherwise, train TOURNAMENT predictor for branch instructions with low degree of correlation
+    else
+    {
+      index = (pc & ((1 << pcIndexBits) - 1)) ^ lhistoryReg;
+      if (localPredictTable[index][ghistoryReg] >= 2)
+        localPredictTable[index][ghistoryReg] -= outcome ? 0 : 1;
+      else if (globalPredictTable[ghistoryReg] >= 2)
+        globalPredictTable[ghistoryReg] -= outcome ? 0 : 1;
+      lhistoryReg = ((lhistoryReg << 1) + outcome) & ((1 << lhistoryBits) - 1);
+      ghistoryReg = ((ghistoryReg << 1) + outcome) & ((1 << ghistoryBits) - 1);
+    }
+    break;
   default:
     break;
   }
