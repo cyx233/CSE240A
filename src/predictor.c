@@ -33,10 +33,10 @@ int verbose;
 //      Predictor Data Structures     //
 //------------------------------------//
 
-int ghistoryReg = 0;
+uint32_t ghistoryReg = 0;
 uint8_t *globalPredictor;
 uint8_t *localPredictor;
-int *lhistoryRegs;
+uint32_t *lhistoryRegs;
 uint8_t *choice;
 
 #define W_LEN 251
@@ -89,18 +89,21 @@ void init_predictor()
       globalPredictor[i] = 1;
     break;
   case TOURNAMENT:
+    ghistoryReg = 0;
     globalPredictor = malloc((1 << ghistoryBits) * sizeof *globalPredictor);
-    for (int i = 0; i < (1 << ghistoryBits); ++i)
+    for (int i = 0; i < (1 << ghistoryBits); i++)
       globalPredictor[i] = 1;
-    localPredictor = malloc((1 << pcIndexBits) * sizeof localPredictor);
-    for (int i = 0; i < (1 << pcIndexBits); ++i)
-      localPredictor[i] = 1;
-    lhistoryRegs = malloc((1 << lhistoryBits) * sizeof lhistoryRegs);
-    for (int i = 0; i < (1 << lhistoryBits); ++i)
-      lhistoryRegs[i] = 0;
     choice = malloc((1 << ghistoryBits) * sizeof *choice);
-    for (int i = 0; i < (1 << ghistoryBits); ++i)
-      choice[i] = 2;
+    for (int i = 0; i < (1 << ghistoryBits); i++)
+      choice[i] = 1;
+
+    lhistoryRegs = malloc((1 << pcIndexBits) * sizeof lhistoryRegs);
+    for (int i = 0; i < (1 << pcIndexBits); i++)
+      lhistoryRegs[i] = 0;
+    localPredictor = malloc((1 << lhistoryBits) * sizeof localPredictor);
+    for (int i = 0; i < (1 << lhistoryBits); i++)
+      localPredictor[i] = 1;
+
     break;
   case CUSTOM:
     threshold = 1.25 * W_H + 14;
@@ -114,7 +117,7 @@ void init_predictor()
   }
 }
 
-int clip(int reg, int bits)
+uint32_t clip(uint32_t reg, int bits)
 {
   return reg & ((1 << bits) - 1);
 }
@@ -141,8 +144,8 @@ make_prediction(uint32_t pc)
     return globalPredictor[clip(pc ^ ghistoryReg, ghistoryBits)] >= 2 ? TAKEN : NOTTAKEN;
   case TOURNAMENT:
     ghis = clip(ghistoryReg, ghistoryBits);
-    return choice[ghis] >= 2
-               ? globalPredictor[ghis] >= 2 ? TAKEN : NOTTAKEN
+    return choice[ghis] <= 1
+               ? (globalPredictor[ghis] >= 2 ? TAKEN : NOTTAKEN)
            : localPredictor[lhistoryRegs[clip(pc, pcIndexBits)]] >= 2 ? TAKEN
                                                                       : NOTTAKEN;
   case CUSTOM:
@@ -177,53 +180,42 @@ void train_predictor(uint32_t pc, uint8_t outcome)
     ghistoryReg = clip((ghistoryReg << 1) + outcome, ghistoryBits);
     break;
   case TOURNAMENT:
-    index = lhistoryRegs[clip(pc, pcIndexBits)];
+    index = clip(pc, pcIndexBits);
     ghis = clip(ghistoryReg, ghistoryBits);
-    if (choice[ghis] >= 2)
+    if (choice[ghis] <= 1)
     {
-      if (outcome == TAKEN)
-      {
-        if (globalPredictor[ghis] >= 2)
-          choice[ghis] = 3;
-        else
-          choice[ghis] -= 1;
-        if (globalPredictor[ghis] < 3)
-          globalPredictor[ghis] += 1;
-      }
+      if ((outcome == TAKEN && globalPredictor[ghis] >= 2) ||
+          (outcome == NOTTAKEN && globalPredictor[ghis] <= 1))
+        choice[ghis] = 0;
       else
-      {
-        if (globalPredictor[ghis] >= 2)
-          choice[ghis] -= 1;
-        else
-          choice[ghis] = 3;
-        if (globalPredictor[ghis] > 0)
-          globalPredictor[ghis] -= 1;
-      }
+        choice[ghis] += 1;
     }
     else
     {
-      if (outcome == TAKEN)
-      {
-        if (localPredictor[index] >= 2)
-          choice[ghis] = 0;
-        else
-          choice[ghis] += 1;
-        if (localPredictor[index] < 3)
-          localPredictor[index] += 1;
-      }
+      if ((outcome == TAKEN && localPredictor[lhistoryRegs[index]] >= 2) ||
+          (outcome == NOTTAKEN && localPredictor[lhistoryRegs[index]] <= 1))
+        choice[ghis] = 3;
       else
-      {
-        if (localPredictor[index] >= 2)
-          choice[ghis] += 1;
-        else
-          choice[ghis] = 0;
-        if (localPredictor[index] > 0)
-          localPredictor[index] -= 1;
-      }
+        choice[ghis] -= 1;
+    }
+
+    if (outcome == TAKEN)
+    {
+      if (globalPredictor[ghis] < 3)
+        globalPredictor[ghis] += 1;
+      if (localPredictor[lhistoryRegs[index]] < 3)
+        localPredictor[lhistoryRegs[index]] += 1;
+    }
+    else
+    {
+      if (globalPredictor[ghis] > 0)
+        globalPredictor[ghis] -= 1;
+      if (localPredictor[lhistoryRegs[index]] > 0)
+        localPredictor[lhistoryRegs[index]] -= 1;
     }
 
     ghistoryReg = clip((ghistoryReg << 1) + outcome, ghistoryBits);
-    lhistoryRegs[clip(pc, pcIndexBits)] = clip((lhistoryRegs[clip(pc, pcIndexBits)] << 1) + outcome, lhistoryBits);
+    lhistoryRegs[index] = clip((lhistoryRegs[index] << 1) + outcome, lhistoryBits);
     break;
   case CUSTOM:
     index = hash(pc);
