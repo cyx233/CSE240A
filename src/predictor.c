@@ -83,19 +83,18 @@ void init_predictor()
   case STATIC:
     break;
   case GSHARE:
+    ghistoryReg = 0;
     globalPredictor = malloc((1 << ghistoryBits) * sizeof *globalPredictor);
     for (int i = 0; i < (1 << ghistoryBits); i++)
-      globalPredictor[i] = NOTTAKEN;
+      globalPredictor[i] = 1;
     break;
   case TOURNAMENT:
     globalPredictor = malloc((1 << ghistoryBits) * sizeof *globalPredictor);
     for (int i = 0; i < (1 << ghistoryBits); ++i)
-      globalPredictor[i] = 2;
+      globalPredictor[i] = 1;
     localPredictor = malloc((1 << pcIndexBits) * sizeof localPredictor);
     for (int i = 0; i < (1 << pcIndexBits); ++i)
-    {
-      localPredictor[i] = 2;
-    }
+      localPredictor[i] = 1;
     lhistoryRegs = malloc((1 << lhistoryBits) * sizeof lhistoryRegs);
     for (int i = 0; i < (1 << lhistoryBits); ++i)
       lhistoryRegs[i] = 0;
@@ -139,7 +138,7 @@ make_prediction(uint32_t pc)
   case STATIC:
     return TAKEN;
   case GSHARE:
-    return globalPredictor[(pc & ((1 << ghistoryBits) - 1)) ^ ghistoryReg];
+    return globalPredictor[clip(pc ^ ghistoryReg, ghistoryBits)] >= 2 ? TAKEN : NOTTAKEN;
   case TOURNAMENT:
     ghis = clip(ghistoryReg, ghistoryBits);
     return choice[ghis] >= 2
@@ -170,8 +169,12 @@ void train_predictor(uint32_t pc, uint8_t outcome)
   case STATIC:
     break;
   case GSHARE:
-    globalPredictor[(pc & ((1 << ghistoryBits) - 1)) ^ ghistoryReg] = outcome;
-    ghistoryReg = ((ghistoryReg << 1) + outcome) & ((1 << ghistoryBits) - 1);
+    index = clip(pc ^ ghistoryReg, ghistoryBits);
+    if (outcome == TAKEN && globalPredictor[index] < 3)
+      globalPredictor[index] += 1;
+    if (outcome == NOTTAKEN && globalPredictor[index] > 0)
+      globalPredictor[index] -= 1;
+    ghistoryReg = clip((ghistoryReg << 1) + outcome, ghistoryBits);
     break;
   case TOURNAMENT:
     index = lhistoryRegs[clip(pc, pcIndexBits)];
@@ -219,8 +222,8 @@ void train_predictor(uint32_t pc, uint8_t outcome)
       }
     }
 
-    ghistoryReg = ((ghistoryReg << 1) + outcome) & ((1 << ghistoryBits) - 1);
-    lhistoryRegs[clip(pc, pcIndexBits)] = ((lhistoryRegs[clip(pc, pcIndexBits)] << 1) + outcome) & ((1 << lhistoryBits) - 1);
+    ghistoryReg = clip((ghistoryReg << 1) + outcome, ghistoryBits);
+    lhistoryRegs[clip(pc, pcIndexBits)] = clip((lhistoryRegs[clip(pc, pcIndexBits)] << 1) + outcome, lhistoryBits);
     break;
   case CUSTOM:
     index = hash(pc);
