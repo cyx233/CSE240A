@@ -39,12 +39,12 @@ uint8_t *localPredictor;
 int *lhistoryRegs;
 uint8_t *choice;
 
-#define W_LEN 127
+#define W_LEN 251
 #define W_H 32
-#define MAX_WEIGHT 1 << 14
+#define MAX_WEIGHT 1 << 7
 
-int16_t W[W_LEN][W_H]; // 16*127*32 = 63.5KB
-int8_t ghistory[W_H];  // 32*8 = 0.25KB
+int8_t W[W_LEN][W_H]; // 8*251*32 = 62.75KB
+int8_t ghistory[W_H]; // 32*8 = 0.25KB
 
 int threshold;
 uint8_t _hot = -1;
@@ -56,9 +56,9 @@ uint8_t train = 0;
 
 // Initialize the predictor
 //
-int hash(uint32_t pc) { return (pc * 19) % W_LEN; }
+int hash(uint32_t pc) { return (pc * 3) % W_LEN; }
 
-void backward(int16_t *w, uint8_t same) { *w += same == 1 ? (*w < MAX_WEIGHT - 1 ? 1 : 0) : (*w > -MAX_WEIGHT ? -1 : 0); }
+void backward(int8_t *w, uint8_t same) { *w += same == 1 ? (*w < MAX_WEIGHT - 1 ? 1 : 0) : (*w > -MAX_WEIGHT ? -1 : 0); }
 int forward(uint32_t pc)
 {
   int index = hash(pc);
