@@ -38,6 +38,8 @@ uint8_t *globalPredictor;
 uint8_t *localPredictor;
 uint32_t *lhistoryRegs;
 uint8_t *choice;
+uint8_t lpred;
+uint8_t gpred;
 
 #define W_LEN 251
 #define W_H 32
@@ -144,10 +146,9 @@ make_prediction(uint32_t pc)
     return globalPredictor[clip(pc ^ ghistoryReg, ghistoryBits)] >= 2 ? TAKEN : NOTTAKEN;
   case TOURNAMENT:
     ghis = clip(ghistoryReg, ghistoryBits);
-    return choice[ghis] <= 1
-               ? (globalPredictor[ghis] >= 2 ? TAKEN : NOTTAKEN)
-           : localPredictor[lhistoryRegs[clip(pc, pcIndexBits)]] >= 2 ? TAKEN
-                                                                      : NOTTAKEN;
+    gpred = globalPredictor[ghis] >= 2 ? TAKEN : NOTTAKEN;
+    lpred = localPredictor[lhistoryRegs[clip(pc, pcIndexBits)]] >= 2 ? TAKEN : NOTTAKEN;
+    return choice[ghis] <= 1 ? gpred : lpred;
   case CUSTOM:
     return forward(pc);
   default:
@@ -182,20 +183,14 @@ void train_predictor(uint32_t pc, uint8_t outcome)
   case TOURNAMENT:
     index = clip(pc, pcIndexBits);
     ghis = clip(ghistoryReg, ghistoryBits);
-    if (choice[ghis] <= 1)
+    if (gpred != lpred)
     {
-      if ((outcome == TAKEN && globalPredictor[ghis] >= 2) ||
-          (outcome == NOTTAKEN && globalPredictor[ghis] <= 1))
-        choice[ghis] = 0;
-      else
-        choice[ghis] += 1;
-    }
-    else
-    {
-      if ((outcome == TAKEN && localPredictor[lhistoryRegs[index]] >= 2) ||
-          (outcome == NOTTAKEN && localPredictor[lhistoryRegs[index]] <= 1))
-        choice[ghis] = 3;
-      else
+      if (outcome == lpred)
+      {
+        if (choice[ghis] < 3)
+          choice[ghis] += 1;
+      }
+      else if (choice[ghis] > 0)
         choice[ghis] -= 1;
     }
 
