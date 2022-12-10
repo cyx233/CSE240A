@@ -45,8 +45,8 @@ uint8_t gpred;
 #define W_H 32
 #define MAX_WEIGHT 1 << 7
 
-int8_t W[W_LEN][W_H]; // 8*251*32 = 62.75KB
-int8_t ghistory[W_H]; // 32*8 = 0.25KB
+int8_t W[W_LEN][W_H]; // 8*251*32 = 62.75Kbits
+int8_t ghistory[W_H]; // 32*8 = 0.25Kbits
 
 int threshold;
 uint8_t _hot = -1;
