@@ -45,8 +45,8 @@ uint8_t gpred;
 #define W_H 32
 #define MAX_WEIGHT 1 << 7
 
-int8_t W[W_LEN][W_H]; // 8*251*32 = 62.75Kbits
-int8_t ghistory[W_H]; // 32*8 = 0.25Kbits
+int8_t W[W_LEN][W_H];     // 8*251*32 = 62.75Kbits
+int8_t ghistory[W_H - 1]; // 31*8 = 0.24Kbits
 
 int threshold;
 uint8_t _hot = -1;
@@ -218,7 +218,7 @@ void train_predictor(uint32_t pc, uint8_t outcome)
     if ((_hot != outcome) || train)
     {
       backward(&(W[index][0]), pout);
-      for (int i = 1; i <= W_H; i++)
+      for (int i = 1; i < W_H; i++)
         backward(&(W[index][i]), (pout == ghistory[i - 1]));
     }
 
